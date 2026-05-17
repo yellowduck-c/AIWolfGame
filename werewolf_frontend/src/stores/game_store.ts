@@ -3,7 +3,7 @@ import { computed, ref } from 'vue'
 
 export type AgentStatus = 'alive' | 'dead' | 'exiled'
 export type ConnectionStatus = 'connecting' | 'connected' | 'disconnected' | 'error'
-export type RoleKey = 'werewolf' | 'seer' | 'witch' | 'hunter' | 'villager'
+export type RoleKey = 'werewolf' | 'seer' | 'witch' | 'hunter' | 'idiot' | 'villager'
 export type GameMode = 'ai_only' | 'human_mixed'
 
 export type Agent = {
@@ -17,6 +17,16 @@ export type Agent = {
   displayName: string
   visibleRole: string
   visibleCamp: string
+  canVote: boolean
+  canSpeak: boolean
+  isAlive: boolean
+  revealedRole: string | null
+  statusLabel: string
+}
+
+type AssignedRole = {
+  id: number
+  role_key: RoleKey
 }
 
 export type SpeakLogEntry = {
@@ -40,6 +50,17 @@ export type HumanSkillConfig = {
   emptyMessage: string
 }
 
+type AgentStatusUpdatePayload = {
+  id: number
+  status: AgentStatus
+  role?: string
+  revealed_role?: string
+  can_vote?: boolean
+  can_speak?: boolean
+  is_alive?: boolean
+  special?: string
+}
+
 const DEFAULT_HUMAN_SKILL_CONFIG: HumanSkillConfig = {
   mode: 'none',
   title: '无主动技能',
@@ -50,39 +71,40 @@ const DEFAULT_HUMAN_SKILL_CONFIG: HumanSkillConfig = {
   emptyMessage: '当前无需执行技能操作。',
 }
 
-type MockAgentTemplate = Omit<Agent, 'role' | 'camp' | 'playerType' | 'displayName'>
+type MockAgentTemplate = Omit<Agent, 'role' | 'camp' | 'playerType' | 'displayName' | 'visibleRole' | 'visibleCamp'>
 
 const ROLE_LABELS: Record<RoleKey, { role: string; camp: string }> = {
   werewolf: { role: '狼人', camp: '狼人' },
   seer: { role: '预言家', camp: '好人' },
   witch: { role: '女巫', camp: '好人' },
   hunter: { role: '猎人', camp: '好人' },
+  idiot: { role: '白痴', camp: '好人' },
   villager: { role: '村民', camp: '好人' },
 }
 
 const DEFAULT_ROLE_CONFIGS: Record<number, RoleConfig> = {
-  6: { werewolf: 2, seer: 1, witch: 1, hunter: 0, villager: 2 },
-  7: { werewolf: 2, seer: 1, witch: 1, hunter: 1, villager: 2 },
-  8: { werewolf: 2, seer: 1, witch: 1, hunter: 1, villager: 3 },
-  9: { werewolf: 3, seer: 1, witch: 1, hunter: 1, villager: 3 },
-  10: { werewolf: 3, seer: 1, witch: 1, hunter: 1, villager: 4 },
-  11: { werewolf: 3, seer: 1, witch: 1, hunter: 1, villager: 5 },
-  12: { werewolf: 4, seer: 1, witch: 1, hunter: 1, villager: 5 },
+  6: { werewolf: 2, seer: 1, witch: 0, hunter: 1, idiot: 0, villager: 2 },
+  7: { werewolf: 2, seer: 1, witch: 1, hunter: 1, idiot: 0, villager: 2 },
+  8: { werewolf: 3, seer: 1, witch: 1, hunter: 1, idiot: 0, villager: 2 },
+  9: { werewolf: 3, seer: 1, witch: 1, hunter: 1, idiot: 0, villager: 3 },
+  10: { werewolf: 3, seer: 1, witch: 1, hunter: 1, idiot: 0, villager: 4 },
+  11: { werewolf: 4, seer: 1, witch: 1, hunter: 1, idiot: 1, villager: 3 },
+  12: { werewolf: 4, seer: 1, witch: 1, hunter: 1, idiot: 1, villager: 4 },
 }
 
 const MOCK_AGENT_POOL: MockAgentTemplate[] = [
-  { id: 1, status: 'alive', currentSpeech: '我是平民，这轮先看 4 号。', speechHistory: ['我是平民，这轮先看 4 号。', '先别急着站边。'] },
-  { id: 2, status: 'alive', currentSpeech: '昨晚我查验了 5 号。', speechHistory: ['昨晚我查验了 5 号。', '今天先从对跳里找狼。'] },
-  { id: 3, status: 'alive', currentSpeech: '我先听完发言再决定。', speechHistory: ['我先听完发言再决定。', '目前药还没有交代。'] },
-  { id: 4, status: 'alive', currentSpeech: '这轮不要乱投。', speechHistory: ['这轮不要乱投。', '我会盯紧末置位。'] },
-  { id: 5, status: 'dead', currentSpeech: '我怀疑 1 号和 6 号。', speechHistory: ['我怀疑 1 号和 6 号。', '我的票会挂在 1 号。'] },
-  { id: 6, status: 'alive', currentSpeech: '我建议先看沉默位。', speechHistory: ['我建议先看沉默位。', '今天先出信息少的。'] },
-  { id: 7, status: 'alive', currentSpeech: '2 号视角比较完整。', speechHistory: ['2 号视角比较完整。', '我暂时跟 2 号票。'] },
-  { id: 8, status: 'alive', currentSpeech: '我想听 9 号和 10 号的解释。', speechHistory: ['我想听 9 号和 10 号的解释。', '后位别再划水了。'] },
-  { id: 9, status: 'exiled', currentSpeech: '我不是狼，出我会很亏。', speechHistory: ['我不是狼，出我会很亏。', '你们别被带节奏。'] },
-  { id: 10, status: 'alive', currentSpeech: '我会重点看 6 号和 8 号。', speechHistory: ['我会重点看 6 号和 8 号。', '这局要防倒钩。'] },
-  { id: 11, status: 'alive', currentSpeech: '我先听 12 号归票。', speechHistory: ['我先听 12 号归票。', '今天先把焦点收紧。'] },
-  { id: 12, status: 'alive', currentSpeech: '我觉得 3 号发言不自然。', speechHistory: ['我觉得 3 号发言不自然。', '先看对跳和票型。'] },
+  { id: 1, status: 'alive', currentSpeech: '', speechHistory: [], canVote: true, canSpeak: true, isAlive: true, revealedRole: null, statusLabel: '存活' },
+  { id: 2, status: 'alive', currentSpeech: '', speechHistory: [], canVote: true, canSpeak: true, isAlive: true, revealedRole: null, statusLabel: '存活' },
+  { id: 3, status: 'alive', currentSpeech: '', speechHistory: [], canVote: true, canSpeak: true, isAlive: true, revealedRole: null, statusLabel: '存活' },
+  { id: 4, status: 'alive', currentSpeech: '', speechHistory: [], canVote: true, canSpeak: true, isAlive: true, revealedRole: null, statusLabel: '存活' },
+  { id: 5, status: 'alive', currentSpeech: '', speechHistory: [], canVote: true, canSpeak: true, isAlive: true, revealedRole: null, statusLabel: '存活' },
+  { id: 6, status: 'alive', currentSpeech: '', speechHistory: [], canVote: true, canSpeak: true, isAlive: true, revealedRole: null, statusLabel: '存活' },
+  { id: 7, status: 'alive', currentSpeech: '', speechHistory: [], canVote: true, canSpeak: true, isAlive: true, revealedRole: null, statusLabel: '存活' },
+  { id: 8, status: 'alive', currentSpeech: '', speechHistory: [], canVote: true, canSpeak: true, isAlive: true, revealedRole: null, statusLabel: '存活' },
+  { id: 9, status: 'alive', currentSpeech: '', speechHistory: [], canVote: true, canSpeak: true, isAlive: true, revealedRole: null, statusLabel: '存活' },
+  { id: 10, status: 'alive', currentSpeech: '', speechHistory: [], canVote: true, canSpeak: true, isAlive: true, revealedRole: null, statusLabel: '存活' },
+  { id: 11, status: 'alive', currentSpeech: '', speechHistory: [], canVote: true, canSpeak: true, isAlive: true, revealedRole: null, statusLabel: '存活' },
+  { id: 12, status: 'alive', currentSpeech: '', speechHistory: [], canVote: true, canSpeak: true, isAlive: true, revealedRole: null, statusLabel: '存活' },
 ]
 
 function cloneRoleConfig(playerCount: number): RoleConfig {
@@ -102,7 +124,7 @@ function shuffleRoleSequence(roleSequence: RoleKey[]): RoleKey[] {
 
 function buildRoleSequence(roleConfig: RoleConfig, playerCount: number, randomize: boolean): RoleKey[] {
   const sequence: RoleKey[] = []
-  const orderedKeys: RoleKey[] = ['werewolf', 'seer', 'witch', 'hunter', 'villager']
+  const orderedKeys: RoleKey[] = ['werewolf', 'seer', 'witch', 'hunter', 'idiot', 'villager']
 
   orderedKeys.forEach((key) => {
     for (let index = 0; index < roleConfig[key]; index += 1) {
@@ -114,13 +136,30 @@ function buildRoleSequence(roleConfig: RoleConfig, playerCount: number, randomiz
   return randomize ? shuffleRoleSequence(sliced) : sliced
 }
 
-function createMockAgents(playerCount: number, roleConfig: RoleConfig, randomizeRoles: boolean, gameMode: GameMode): Agent[] {
+function createAssignedRoles(playerCount: number, roleConfig: RoleConfig, randomizeRoles: boolean): AssignedRole[] {
   const roleSequence = buildRoleSequence(roleConfig, playerCount, randomizeRoles)
-  const humanPlayerId = gameMode === 'human_mixed' ? 1 : null
-  const humanRoleKey = humanPlayerId === null ? null : roleSequence[humanPlayerId - 1] ?? null
+  return roleSequence.map((roleKey, index) => ({
+    id: index + 1,
+    role_key: roleKey,
+  }))
+}
 
-  return MOCK_AGENT_POOL.slice(0, playerCount).map((agent, index) => {
-    const roleKey = roleSequence[index] ?? 'villager'
+function getStatusLabel(status: AgentStatus, revealedRole: string | null = null): string {
+  if (status === 'dead') {
+    return '死亡'
+  }
+  if (status === 'exiled') {
+    return revealedRole === '白痴' ? '白痴已放逐' : '放逐'
+  }
+  return '存活'
+}
+
+function createMockAgentsFromAssignments(assignedRoles: AssignedRole[], gameMode: GameMode): Agent[] {
+  const humanPlayerId = gameMode === 'human_mixed' ? 1 : null
+  const humanRoleKey = humanPlayerId === null ? null : assignedRoles.find((assignment) => assignment.id === humanPlayerId)?.role_key ?? null
+
+  return MOCK_AGENT_POOL.slice(0, assignedRoles.length).map((agent, index) => {
+    const roleKey = assignedRoles[index]?.role_key ?? 'villager'
     const roleMeta = ROLE_LABELS[roleKey]
     const isHuman = humanPlayerId === agent.id
     const visibleRole = gameMode === 'ai_only' || isHuman || (humanRoleKey === 'werewolf' && roleKey === 'werewolf')
@@ -134,18 +173,55 @@ function createMockAgents(playerCount: number, roleConfig: RoleConfig, randomize
       ...agent,
       role: roleMeta.role,
       camp: roleMeta.camp,
+      status: 'alive',
+      currentSpeech: '',
+      speechHistory: [],
       playerType: isHuman ? 'human' : 'ai',
       displayName: isHuman ? '1 号玩家（人类）' : `${agent.id} 号玩家（AI）`,
       visibleRole,
       visibleCamp,
-      speechHistory: [...agent.speechHistory],
+      canVote: true,
+      canSpeak: true,
+      isAlive: true,
+      revealedRole: null,
+      statusLabel: getStatusLabel('alive'),
+    }
+  })
+}
+
+function createMockAgents(playerCount: number, roleConfig: RoleConfig, randomizeRoles: boolean, gameMode: GameMode): Agent[] {
+  const assignedRoles = createAssignedRoles(playerCount, roleConfig, randomizeRoles)
+  return createMockAgentsFromAssignments(assignedRoles, gameMode)
+}
+
+function createEmptyAgents(playerCount: number, gameMode: GameMode): Agent[] {
+  const humanPlayerId = gameMode === 'human_mixed' ? 1 : null
+
+  return MOCK_AGENT_POOL.slice(0, playerCount).map((agent) => {
+    const isHuman = humanPlayerId === agent.id
+    return {
+      ...agent,
+      role: '',
+      camp: '',
+      status: 'alive',
+      currentSpeech: '',
+      speechHistory: [],
+      playerType: isHuman ? 'human' : 'ai',
+      displayName: isHuman ? '1 号玩家（人类）' : `${agent.id} 号玩家（AI）`,
+      visibleRole: '',
+      visibleCamp: '',
+      canVote: true,
+      canSpeak: true,
+      isAlive: true,
+      revealedRole: null,
+      statusLabel: getStatusLabel('alive'),
     }
   })
 }
 
 function createMockLogs(agents: Agent[]): SpeakLogEntry[] {
   return agents
-    .filter((agent) => agent.id <= Math.min(agents.length, 8))
+    .filter((agent) => agent.id <= Math.min(agents.length, 8) && agent.currentSpeech)
     .map((agent, index) => ({
       timestamp: `20:00:${String(index * 7 + 1).padStart(2, '0')}`,
       id: agent.id,
@@ -217,29 +293,37 @@ function getHumanSkillConfig(roleKey: RoleKey | null, canUseHunterSkill: boolean
   }
 }
 
+function hasAssignedIdentity(agents: Agent[]): boolean {
+  return agents.length > 0 && agents.every((agent) => Boolean(agent.role && agent.camp))
+}
+
 export const useGameStore = defineStore('game', () => {
   const configuredPlayerCount = ref(10)
   const configuredRoleCounts = ref<RoleConfig>(cloneRoleConfig(configuredPlayerCount.value))
+  const assignedRoles = ref<AssignedRole[]>(createAssignedRoles(configuredPlayerCount.value, configuredRoleCounts.value, false))
   const gameMode = ref<GameMode>('ai_only')
   const agents = ref<Agent[]>(createMockAgents(configuredPlayerCount.value, configuredRoleCounts.value, false, gameMode.value))
   const speakLogs = ref<SpeakLogEntry[]>(createMockLogs(agents.value))
   const currentPhase = ref('day_speech')
+  const currentGameId = ref('')
   const winner = ref('')
   const connectionStatus = ref<ConnectionStatus>('disconnected')
   const connectionMessage = ref('尚未建立连接。')
   const lastCommand = ref('')
+  const pendingCommand = ref('')
+  const liveGameStarted = ref(false)
   const humanSpeechDraft = ref('')
   const humanVoteTarget = ref<number | null>(null)
   const humanSkillTarget = ref<number | null>(null)
   const humanSkillAction = ref<HumanSkillAction>('none')
 
-  const aliveCount = computed(() => agents.value.filter((agent) => agent.status === 'alive').length)
+  const aliveCount = computed(() => agents.value.filter((agent) => agent.isAlive).length)
   const humanPlayerId = computed(() => (gameMode.value === 'human_mixed' ? 1 : null))
   const humanPlayer = computed(() => agents.value.find((agent) => agent.playerType === 'human') ?? null)
   const humanRoleKey = computed<RoleKey | null>(() => getHumanRoleKey(humanPlayer.value?.role))
   const canUseHunterSkill = computed(() => humanRoleKey.value === 'hunter' && humanPlayer.value?.status !== 'alive')
   const humanSkillConfig = computed<HumanSkillConfig>(() => getHumanSkillConfig(humanRoleKey.value, canUseHunterSkill.value))
-  const aliveOtherAgents = computed(() => agents.value.filter((agent) => agent.status === 'alive' && agent.playerType !== 'human'))
+  const aliveOtherAgents = computed(() => agents.value.filter((agent) => agent.isAlive && agent.playerType !== 'human'))
   const humanSkillTargets = computed(() => {
     if (humanSkillConfig.value.mode === 'none' || humanSkillConfig.value.mode === 'hunter_wait') {
       return []
@@ -247,9 +331,13 @@ export const useGameStore = defineStore('game', () => {
 
     return aliveOtherAgents.value
   })
-  const canSubmitHumanSpeech = computed(() => Boolean(humanPlayer.value) && humanSpeechDraft.value.trim().length > 0)
-  const canSubmitHumanVote = computed(() => Boolean(humanPlayer.value) && humanVoteTarget.value !== null)
+  const canSubmitHumanSpeech = computed(() => Boolean(humanPlayer.value?.canSpeak) && humanSpeechDraft.value.trim().length > 0)
+  const canSubmitHumanVote = computed(() => Boolean(humanPlayer.value?.canVote) && humanVoteTarget.value !== null)
   const canSubmitHumanSkill = computed(() => {
+    if (!humanPlayer.value?.isAlive) {
+      return false
+    }
+
     switch (humanRoleKey.value) {
       case 'werewolf':
       case 'seer':
@@ -262,12 +350,17 @@ export const useGameStore = defineStore('game', () => {
         return false
     }
   })
+  const canStartGame = computed(() => connectionStatus.value === 'connected' && !pendingCommand.value)
 
   function rebuildMockState(randomizeRoles = false): void {
-    agents.value = createMockAgents(configuredPlayerCount.value, configuredRoleCounts.value, randomizeRoles, gameMode.value)
+    assignedRoles.value = createAssignedRoles(configuredPlayerCount.value, configuredRoleCounts.value, randomizeRoles)
+    agents.value = createMockAgentsFromAssignments(assignedRoles.value, gameMode.value)
     speakLogs.value = createMockLogs(agents.value)
     winner.value = ''
+    currentGameId.value = ''
     currentPhase.value = 'day_speech'
+    pendingCommand.value = ''
+    liveGameStarted.value = false
     humanSpeechDraft.value = ''
     humanVoteTarget.value = null
     humanSkillTarget.value = null
@@ -283,12 +376,28 @@ export const useGameStore = defineStore('game', () => {
     currentPhase.value = phase
   }
 
+  function setCurrentGameId(gameId: string): void {
+    currentGameId.value = gameId
+  }
+
   function setWinner(nextWinner: string): void {
     winner.value = nextWinner
   }
 
   function setLastCommand(command: string): void {
     lastCommand.value = command
+  }
+
+  function setPendingCommand(command: string): void {
+    pendingCommand.value = command
+  }
+
+  function clearPendingCommand(): void {
+    pendingCommand.value = ''
+  }
+
+  function setLiveGameStarted(started: boolean): void {
+    liveGameStarted.value = started
   }
 
   function setHumanSpeechDraft(content: string): void {
@@ -325,29 +434,99 @@ export const useGameStore = defineStore('game', () => {
     rebuildMockState(true)
   }
 
+  function buildGameStartConfig(): { player_count: number; role_counts: RoleConfig; assigned_roles: AssignedRole[] } {
+    if (!hasAssignedIdentity(agents.value)) {
+      rebuildMockState(true)
+    }
+
+    if (assignedRoles.value.length !== configuredPlayerCount.value) {
+      assignedRoles.value = createAssignedRoles(configuredPlayerCount.value, configuredRoleCounts.value, false)
+    }
+
+    return {
+      player_count: configuredPlayerCount.value,
+      role_counts: { ...configuredRoleCounts.value },
+      assigned_roles: assignedRoles.value.map((assignment) => ({ ...assignment })),
+    }
+  }
+
   function initializeAgents(nextAgents: Array<{ id: number; role: string; camp: string; status: AgentStatus }>): void {
     configuredPlayerCount.value = nextAgents.length
     configuredRoleCounts.value = cloneRoleConfig(nextAgents.length)
+    currentPhase.value = 'night'
+    winner.value = ''
+    speakLogs.value = []
+    liveGameStarted.value = true
+    pendingCommand.value = ''
     agents.value = nextAgents.map((agent) => ({
       ...agent,
       currentSpeech: '',
       speechHistory: [],
-      playerType: 'ai',
-      displayName: `${agent.id} 号玩家（AI）`,
+      playerType: gameMode.value === 'human_mixed' && agent.id === 1 ? 'human' : 'ai',
+      displayName: gameMode.value === 'human_mixed' && agent.id === 1 ? '1 号玩家（人类）' : `${agent.id} 号玩家（AI）`,
       visibleRole: agent.role,
       visibleCamp: agent.camp,
+      canVote: true,
+      canSpeak: true,
+      isAlive: agent.status === 'alive',
+      revealedRole: null,
+      statusLabel: getStatusLabel(agent.status),
     }))
+  }
+
+  function resetGameState(): void {
+    assignedRoles.value = []
+    agents.value = createEmptyAgents(configuredPlayerCount.value, gameMode.value)
+    speakLogs.value = []
+    currentPhase.value = ''
+    currentGameId.value = ''
+    winner.value = ''
+    pendingCommand.value = ''
+    liveGameStarted.value = false
+    humanSpeechDraft.value = ''
+    humanVoteTarget.value = null
+    humanSkillTarget.value = null
+    humanSkillAction.value = 'none'
+  }
+
+  function updateStreamingSpeech(payload: { id: number; content: string }): void {
+    agents.value = agents.value.map((agent) => {
+      if (agent.id !== payload.id) {
+        return agent
+      }
+
+      return {
+        ...agent,
+        currentSpeech: payload.content,
+      }
+    })
   }
 
   function appendSpeech(payload: { id: number; role: string; content: string }): void {
     const timestamp = new Date().toLocaleTimeString('zh-CN', { hour12: false })
-    const agent = agents.value.find((item) => item.id === payload.id)
 
-    if (agent) {
-      agent.currentSpeech = payload.content
-      agent.speechHistory.unshift(payload.content)
-      agent.speechHistory = agent.speechHistory.slice(0, 5)
-    }
+    agents.value = agents.value.map((agent) => {
+      if (agent.id !== payload.id) {
+        return agent
+      }
+
+      return {
+        ...agent,
+        currentSpeech: payload.content,
+        speechHistory: [payload.content, ...agent.speechHistory].slice(0, 5),
+      }
+    })
+
+    speakLogs.value.unshift({
+      timestamp,
+      id: payload.id,
+      role: payload.role,
+      content: payload.content,
+    })
+  }
+
+  function appendSystemLog(payload: { id: number; role: string; content: string }): void {
+    const timestamp = new Date().toLocaleTimeString('zh-CN', { hour12: false })
 
     speakLogs.value.unshift({
       timestamp,
@@ -361,7 +540,7 @@ export const useGameStore = defineStore('game', () => {
     const agent = humanPlayer.value
     const content = humanSpeechDraft.value.trim()
 
-    if (!agent || !content) {
+    if (!agent || !agent.canSpeak || !content) {
       return
     }
 
@@ -378,7 +557,7 @@ export const useGameStore = defineStore('game', () => {
     const targetId = humanVoteTarget.value
     const target = agents.value.find((item) => item.id === targetId)
 
-    if (!agent || !target) {
+    if (!agent || !agent.canVote || !target) {
       return
     }
 
@@ -396,7 +575,7 @@ export const useGameStore = defineStore('game', () => {
     const targetId = humanSkillTarget.value
     const target = agents.value.find((item) => item.id === targetId)
 
-    if (!agent) {
+    if (!agent || !agent.isAlive) {
       return
     }
 
@@ -463,11 +642,25 @@ export const useGameStore = defineStore('game', () => {
     }
   }
 
-  function updateAgentStatus(payload: { id: number; status: AgentStatus }): void {
-    const agent = agents.value.find((item) => item.id === payload.id)
-    if (agent) {
-      agent.status = payload.status
-    }
+  function updateAgentStatus(payload: AgentStatusUpdatePayload): void {
+    agents.value = agents.value.map((agent) => {
+      if (agent.id !== payload.id) {
+        return agent
+      }
+
+      const revealedRole = payload.revealed_role ?? agent.revealedRole
+      const visibleRole = revealedRole ?? agent.visibleRole
+      return {
+        ...agent,
+        status: payload.status,
+        visibleRole,
+        canVote: payload.can_vote ?? (payload.status === 'alive'),
+        canSpeak: payload.can_speak ?? (payload.status === 'alive'),
+        isAlive: payload.is_alive ?? (payload.status === 'alive'),
+        revealedRole,
+        statusLabel: getStatusLabel(payload.status, revealedRole),
+      }
+    })
   }
 
   return {
@@ -486,19 +679,27 @@ export const useGameStore = defineStore('game', () => {
     canSubmitHumanSpeech,
     canSubmitHumanVote,
     canSubmitHumanSkill,
+    canStartGame,
     aliveOtherAgents,
     agents,
     speakLogs,
     currentPhase,
+    currentGameId,
     winner,
     connectionStatus,
     connectionMessage,
     lastCommand,
+    pendingCommand,
+    liveGameStarted,
     aliveCount,
     setConnectionStatus,
     setPhase,
+    setCurrentGameId,
     setWinner,
     setLastCommand,
+    setPendingCommand,
+    clearPendingCommand,
+    setLiveGameStarted,
     setHumanSpeechDraft,
     setHumanVoteTarget,
     setHumanSkillTarget,
@@ -506,8 +707,12 @@ export const useGameStore = defineStore('game', () => {
     setConfiguredPlayerCount,
     setGameMode,
     randomizeRoles,
+    buildGameStartConfig,
     initializeAgents,
+    resetGameState,
     appendSpeech,
+    updateStreamingSpeech,
+    appendSystemLog,
     submitHumanSpeech,
     submitHumanVote,
     submitHumanSkill,

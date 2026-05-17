@@ -18,6 +18,8 @@ const {
   connectionStatus,
   connectionMessage,
   lastCommand,
+  pendingCommand,
+  liveGameStarted,
   aliveCount,
   configuredPlayerCount,
   configuredRoleCounts,
@@ -32,6 +34,7 @@ const {
   canSubmitHumanSpeech,
   canSubmitHumanVote,
   canSubmitHumanSkill,
+  canStartGame,
   aliveOtherAgents,
 } = storeToRefs(gameStore)
 
@@ -46,6 +49,19 @@ const phaseLabel = computed(() => {
   return labels[currentPhase.value] ?? currentPhase.value
 })
 
+const humanStatusHint = computed(() => {
+  if (!humanPlayer.value) {
+    return ''
+  }
+  if (humanPlayer.value.status === 'exiled' && humanPlayer.value.revealedRole === '白痴') {
+    return '你已被放逐并公开为白痴：仍计入存活人数，但不能发言、不能投票。'
+  }
+  if (!humanPlayer.value.canSpeak && !humanPlayer.value.canVote) {
+    return '你当前无法执行发言或投票操作。'
+  }
+  return '这里会固定展示你当前可见的身份与阵营信息，方便在人机对战中随时确认自己的角色。'
+})
+
 function handleStart(): void {
   sendGameCommand('GAME_START')
 }
@@ -56,6 +72,10 @@ function handlePause(): void {
 
 function handleStop(): void {
   sendGameCommand('GAME_STOP')
+}
+
+function handleReset(): void {
+  sendGameCommand('GAME_RESET')
 }
 
 function handlePlayerCountChange(value: number): void {
@@ -110,12 +130,16 @@ onMounted(() => {
       :phase="phaseLabel"
       :winner="winner"
       :last-command="lastCommand"
+      :pending-command="pendingCommand"
+      :live-game-started="liveGameStarted"
+      :can-start-game="canStartGame"
       :player-count="configuredPlayerCount"
       :role-counts="configuredRoleCounts"
       :game-mode="gameMode"
       @start="handleStart"
       @pause="handlePause"
       @stop="handleStop"
+      @reset="handleReset"
       @player-count-change="handlePlayerCountChange"
       @game-mode-change="handleGameModeChange"
       @randomize-roles="handleRandomizeRoles"
@@ -126,10 +150,10 @@ onMounted(() => {
         <div>
           <p class="eyebrow">Human Role</p>
           <h2>{{ humanPlayer.displayName }} 身份牌</h2>
-          <p class="human-hint">这里会固定展示你当前可见的身份与阵营信息，方便在人机对战中随时确认自己的角色。</p>
+          <p class="human-hint">{{ humanStatusHint }}</p>
         </div>
 
-        <article class="identity-card" :class="[humanPlayer.status, humanPlayer.playerType]">
+        <article class="identity-card" :class="[humanPlayer.status, humanPlayer.playerType, { revealed: Boolean(humanPlayer.revealedRole) }]">
           <header class="identity-card-header">
             <div>
               <h3>{{ humanPlayer.displayName }}</h3>
@@ -137,9 +161,29 @@ onMounted(() => {
             </div>
             <div class="header-tags">
               <span class="player-type-tag">Human</span>
-              <span class="status-tag">{{ humanPlayer.status }}</span>
+              <span class="status-tag">{{ humanPlayer.statusLabel }}</span>
             </div>
           </header>
+
+          <section v-if="humanPlayer.revealedRole" class="identity-meta-row reveal-row">
+            <span>公开身份</span>
+            <strong>{{ humanPlayer.revealedRole }}</strong>
+          </section>
+
+          <section class="identity-meta-grid">
+            <div class="identity-meta-row">
+              <span>是否存活</span>
+              <strong>{{ humanPlayer.isAlive ? '是' : '否' }}</strong>
+            </div>
+            <div class="identity-meta-row">
+              <span>可发言</span>
+              <strong>{{ humanPlayer.canSpeak ? '是' : '否' }}</strong>
+            </div>
+            <div class="identity-meta-row">
+              <span>可投票</span>
+              <strong>{{ humanPlayer.canVote ? '是' : '否' }}</strong>
+            </div>
+          </section>
         </article>
       </section>
 
@@ -158,8 +202,10 @@ onMounted(() => {
             maxlength="120"
             show-word-limit
             placeholder="请输入人类玩家的发言内容..."
+            :disabled="!humanPlayer.canSpeak"
             @update:model-value="(value) => gameStore.setHumanSpeechDraft(String(value))"
           />
+          <p v-if="!humanPlayer.canSpeak" class="human-blocked-hint">当前状态不可发言。</p>
           <el-button type="primary" :disabled="!canSubmitHumanSpeech" @click="handleHumanSpeechSubmit">提交发言</el-button>
         </div>
       </section>
@@ -175,10 +221,12 @@ onMounted(() => {
           <el-select
             :model-value="humanVoteTarget"
             placeholder="请选择投票目标"
+            :disabled="!humanPlayer.canVote"
             @update:model-value="(value) => gameStore.setHumanVoteTarget(Number(value))"
           >
             <el-option v-for="agent in aliveOtherAgents" :key="agent.id" :label="agent.displayName" :value="agent.id" />
           </el-select>
+          <p v-if="!humanPlayer.canVote" class="human-blocked-hint">当前状态不可投票。</p>
           <el-button type="warning" :disabled="!canSubmitHumanVote" @click="handleHumanVoteSubmit">提交投票</el-button>
         </div>
       </section>
@@ -273,7 +321,8 @@ h1 {
 .subtitle,
 .endpoint-box p,
 .human-hint,
-.human-skill-empty {
+.human-skill-empty,
+.human-blocked-hint {
   margin: 8px 0 0;
   color: #cbd5e1;
 }
@@ -312,11 +361,20 @@ h1 {
   border-color: #fbbf24;
 }
 
-.identity-card.dead,
-.identity-card.exiled {
+.identity-card.dead {
   background: #e5e7eb;
   border-color: #f87171;
   color: #4b5563;
+}
+
+.identity-card.exiled {
+  background: #fef3c7;
+  border-color: #f59e0b;
+  color: #92400e;
+}
+
+.identity-card.revealed {
+  box-shadow: 0 18px 40px rgba(245, 158, 11, 0.18);
 }
 
 .identity-card-header {
@@ -356,6 +414,42 @@ h1 {
   color: #1d4ed8;
 }
 
+.identity-card.exiled .status-tag {
+  background: #fde68a;
+  color: #92400e;
+}
+
+.identity-meta-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.identity-meta-row {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 12px;
+  border-radius: 12px;
+  background: rgba(248, 250, 252, 0.88);
+}
+
+.reveal-row {
+  margin-top: 14px;
+  background: rgba(254, 243, 199, 0.85);
+}
+
+.identity-meta-row span {
+  font-size: 12px;
+  color: #64748b;
+}
+
+.identity-meta-row strong {
+  font-size: 14px;
+  color: inherit;
+}
+
 .human-action-panel {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
@@ -378,6 +472,10 @@ h1 {
   min-width: min(100%, 420px);
   flex-direction: column;
   gap: 12px;
+}
+
+.human-blocked-hint {
+  color: #fbbf24;
 }
 
 .content-grid {

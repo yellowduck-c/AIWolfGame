@@ -7,6 +7,9 @@ const props = defineProps<{
   phase: string
   winner: string
   lastCommand: string
+  pendingCommand: string
+  liveGameStarted: boolean
+  canStartGame: boolean
   playerCount: number
   roleCounts: RoleConfig
   gameMode: GameMode
@@ -16,6 +19,7 @@ const emit = defineEmits<{
   start: []
   pause: []
   stop: []
+  reset: []
   playerCountChange: [value: number]
   gameModeChange: [value: GameMode]
   randomizeRoles: []
@@ -26,6 +30,7 @@ const roleItems: Array<{ key: RoleKey; label: string }> = [
   { key: 'seer', label: '预言家' },
   { key: 'witch', label: '女巫' },
   { key: 'hunter', label: '猎人' },
+  { key: 'idiot', label: '白痴' },
   { key: 'villager', label: '村民' },
 ]
 </script>
@@ -41,7 +46,10 @@ const roleItems: Array<{ key: RoleKey; label: string }> = [
     <div class="meta-block">
       <span class="label">当前阶段</span>
       <strong>{{ props.phase }}</strong>
-      <small v-if="props.winner">胜者：{{ props.winner }}</small>
+      <small v-if="props.phase === '对局结束'">胜者：{{ props.winner || '未收到结果' }}</small>
+      <small v-else-if="props.winner">胜者：{{ props.winner }}</small>
+      <small v-else-if="props.pendingCommand">等待响应：{{ props.pendingCommand }}</small>
+      <small v-else-if="props.liveGameStarted">实时对局进行中</small>
       <small v-else>最近指令：{{ props.lastCommand || '暂无' }}</small>
     </div>
 
@@ -84,9 +92,10 @@ const roleItems: Array<{ key: RoleKey; label: string }> = [
     </div>
 
     <div class="actions">
-      <el-button type="success" @click="emit('start')">开始</el-button>
+      <el-button type="success" :disabled="!props.canStartGame" @click="emit('start')">开始</el-button>
       <el-button type="warning" plain @click="emit('pause')">暂停</el-button>
       <el-button type="danger" plain @click="emit('stop')">结束</el-button>
+      <el-button plain @click="emit('reset')">重置对局</el-button>
     </div>
   </section>
 </template>

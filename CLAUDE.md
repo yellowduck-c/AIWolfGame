@@ -4,11 +4,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project status
 
-This repository currently contains requirement documents only, primarily [项目实现规划.md](项目实现规划.md) and [课题要求.md](课题要求.md). No backend, frontend, package manifests, or test configuration have been created yet. Do not invent build, lint, or test commands until the corresponding project files exist.
+This repository now contains a working frontend/backend scaffold for an AI Werewolf game in addition to the original requirement documents. The codebase is still evolving quickly, so verify commands and module layout against the current files before making structural assumptions.
 
 ## Commands
 
-There are no verified development commands yet because the codebase has not been scaffolded. Before suggesting or running build, lint, test, dev-server, or single-test commands, first verify that the relevant project manifests and tool configuration files have been added.
+Verified commands should be re-checked against the current manifests before use. At minimum, backend runtime tests exist under `werewolf_backend/tests/`; prefer verifying exact commands from the current Python environment and test tooling before suggesting broader build/lint workflows.
 
 ## Project goal
 
@@ -21,41 +21,38 @@ The system should support:
 - Structured logging for full-game observability, replay, evaluation, and post-game analysis.
 - A spectator UI for pure AI matches, with human-in-the-loop play reserved as an extension.
 
-## Intended architecture
+## Current architecture
 
-The requirements describe a front-end/back-end split:
+The codebase currently uses a front-end/back-end split:
 
 - Frontend: Vue 3 + TypeScript + Vite, Element Plus, Pinia, Axios, WebSocket.
-- Backend: FastAPI + WebSocket, asyncio, SQLite, an agent-team layer, and an LLM service layer.
-- Communication model: HTTP for game creation and configuration; WebSocket for real-time phase updates, speeches, status changes, and control events.
+- Backend: FastAPI + WebSocket, asyncio, Redis-backed runtime persistence, game engine orchestration, agent package, and an LLM service layer.
+- Communication model: HTTP for health/basic endpoints; WebSocket for game control and real-time phase updates, speeches, status changes, and control events.
 
-Target directory layout from the requirements:
+Current backend package layout:
 
 ```text
 werewolf_backend/
 ├── main.py
-├── config/
+├── agent/
 ├── api/
-├── websocket/
-├── game_engine/
-├── agent_team_core/
-├── llm_service/
+├── cache/
+├── config/
 ├── database/
-└── utils/
-
-werewolf_frontend/
-└── src/
-    ├── stores/
-    ├── utils/
-    ├── views/
-    └── components/
+├── game_engine/
+├── llm_service/
+├── tests/
+├── utils/
+└── websocket/
 ```
+
+Current frontend layout centers on `werewolf_frontend/src/` with stores, utils, views, and components.
 
 ## Big-picture architecture constraints
 
 ### Agent system
 
-Agents should share a common base abstraction but differ by role goals and action space.
+Agents share a common base abstraction but differ by role goals and action space.
 
 Expected cross-cutting agent concerns:
 
@@ -72,7 +69,7 @@ Expected cross-cutting agent concerns:
 
 This is a core architectural requirement.
 
-Future implementations must clearly separate:
+Implementations must clearly separate:
 
 - Public information available to all players.
 - Camp-shared information such as werewolf night coordination.
@@ -89,6 +86,7 @@ The backend game engine is responsible for:
 - Scheduling agent actions at the correct time.
 - Resolving votes, skills, eliminations, and endgame checks.
 - Emitting structured events and final outcomes.
+- Persisting runtime summary and replayable event history in Redis.
 
 The simplified required loop is: night actions → day announcement → speeches → voting → win-condition check.
 
@@ -105,23 +103,30 @@ These logs should be suitable for real-time UI rendering, replay, evaluation, an
 
 ## WebSocket protocol requirements
 
-Frontend → backend commands:
+Frontend → backend commands currently include:
 
 ```json
 {"cmd":"GAME_START"}
 {"cmd":"GAME_PAUSE"}
 {"cmd":"GAME_STOP"}
+{"cmd":"GAME_RESET"}
 ```
 
 The requirements also mention likely future extensions such as speed control and human actions.
 
-Backend → frontend events currently required by the documents:
+Backend → frontend events currently include at least:
 
-- `GAME_STARTED`: sends all agents with `id`, `role`, `camp`, and `status`.
-- `AGENT_SPEAK`: sends `id`, `role`, and `content` for a player speech.
-- `AGENT_STATUS_CHANGE`: sends `id` and new `status` such as `dead`.
-- `PHASE_CHANGE`: sends the current game phase.
-- `GAME_OVER`: sends `winner`.
+- `GAME_STARTED`
+- `AGENT_SPEAK_CHUNK`
+- `AGENT_SPEAK`
+- `AGENT_STATUS_CHANGE`
+- `AGENT_VOTE`
+- `AGENT_SKILL`
+- `PHASE_CHANGE`
+- `GAME_OVER`
+- `GAME_PAUSED`
+- `GAME_RESET`
+- `ERROR`
 
 ## Frontend expectations
 
@@ -134,7 +139,7 @@ Key expectations from the requirements:
 - Per-agent speech history or recent speech should be visible in each card.
 - Layout must adapt cleanly for 6-12 players, with 6-8 fitting compactly and 9-12 using a two-row grid.
 - Dead or exiled players should be visually distinct.
-- UI controls should at least cover start, pause, stop, and optionally speed adjustment.
+- UI controls should at least cover start, pause, stop, reset, and optionally speed adjustment.
 
 ## Scope notes from the requirements
 
