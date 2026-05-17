@@ -7,7 +7,13 @@ from collections.abc import Callable
 
 from agent.state.schemas import AgentDecisionInput, SkillDecision, SpeechDecision, StreamingSpeechDecision, VoteDecision
 from config import settings
-from llm_service.prompt_builder import SPEECH_PROMPT_TEMPLATE, build_skill_prompt, build_speech_prompt, build_vote_prompt
+from llm_service.prompt_builder import (
+    SPEECH_PROMPT_TEMPLATE,
+    build_camp_chat_prompt,
+    build_skill_prompt,
+    build_speech_prompt,
+    build_vote_prompt,
+)
 
 try:
     from langchain_core.output_parsers import StrOutputParser
@@ -52,6 +58,32 @@ class LLMServiceClient:
         if not chunks:
             chunks = [decision.content]
         return StreamingSpeechDecision(content=decision.content, chunks=chunks)
+
+    def generate_camp_chat(self, decision_input: AgentDecisionInput) -> str | None:
+        real_model_available = self._can_use_real_model()
+        logger.info(
+            "llm mode check operation=camp_chat agent_id=%s role=%s provider=%s model=%s real_model_available=%s",
+            decision_input.agent_id,
+            decision_input.role,
+            settings.llm_provider,
+            settings.llm_model,
+            real_model_available,
+        )
+        if real_model_available:
+            content = self._try_generate_real_camp_chat(decision_input)
+            if content is not None:
+                logger.info(
+                    "llm decision generated mode=real operation=camp_chat agent_id=%s role=%s",
+                    decision_input.agent_id,
+                    decision_input.role,
+                )
+                return content
+        logger.info(
+            "llm decision fallback mode=mock operation=camp_chat agent_id=%s role=%s",
+            decision_input.agent_id,
+            decision_input.role,
+        )
+        return self._generate_mock_camp_chat(decision_input)
 
     def generate_vote(self, decision_input: AgentDecisionInput) -> VoteDecision:
         real_model_available = self._can_use_real_model()
@@ -151,6 +183,29 @@ class LLMServiceClient:
         )
         return None
 
+    def _try_generate_real_camp_chat(self, decision_input: AgentDecisionInput) -> str | None:
+        try:
+            raw_output = self._invoke_text_model(decision_input, builder=build_camp_chat_prompt, operation="camp_chat")
+        except Exception as error:
+            logger.warning(
+                "llm invocation failed operation=camp_chat agent_id=%s role=%s provider=%s model=%s error=%s",
+                decision_input.agent_id,
+                decision_input.role,
+                settings.llm_provider,
+                settings.llm_model,
+                error,
+            )
+            return None
+        content = self._parse_text_content(raw_output)
+        if content is not None:
+            return content
+        logger.warning(
+            "llm parse failed operation=camp_chat agent_id=%s role=%s reason=empty_or_invalid_output",
+            decision_input.agent_id,
+            decision_input.role,
+        )
+        return None
+
     def _try_generate_real_skill(self, decision_input: AgentDecisionInput) -> SkillDecision | None:
         try:
             raw_output = self._invoke_text_model(decision_input, builder=build_skill_prompt, operation="skill")
@@ -219,8 +274,23 @@ class LLMServiceClient:
             chain = SPEECH_PROMPT_TEMPLATE | model | StrOutputParser()
             result = chain.invoke(
                 {
+                    "global_rules": decision_input.specialization.get("global_rules_instruction", ""),
                     "role_instruction": decision_input.specialization.get("role_instruction", ""),
                     "action_guidance": decision_input.specialization.get("action_guidance_instruction", ""),
+                    "derived_context": (
+                        json.dumps(
+                            decision_input.derived_context,
+                            ensure_ascii=False,
+                            separators=(",", ":"),
+                        )
+                        if decision_input.derived_context
+                        else ""
+                    ),
+                    "output_contract": "\n".join([
+                        "请生成一句简短自然的中文发言。",
+                        "只输出 JSON 对象，不要输出额外解释、代码块或多余字段。",
+                        "仅输出 JSON：{\"content\":\"...\"}",
+                    ]),
                     "payload": self._build_payload_text(decision_input),
                 }
             ).strip()
@@ -251,6 +321,7 @@ class LLMServiceClient:
                 "camp_shared_state": decision_input.camp_shared_state,
                 "memory_summary": decision_input.memory_summary,
                 "legal_actions": decision_input.legal_actions,
+                "derived_context": decision_input.derived_context,
                 "specialization": decision_input.specialization,
             },
             ensure_ascii=False,
@@ -267,11 +338,18 @@ class LLMServiceClient:
         return parsed
 
     def _parse_speech_decision(self, raw_output: str) -> SpeechDecision | None:
+        content = self._parse_text_content(raw_output)
+        if content is None:
+            return None
+        return SpeechDecision(content=content)
+
+    def _parse_text_content(self, raw_output: str) -> str | None:
         parsed = self._parse_json_object(raw_output)
         if parsed is not None:
             content = parsed.get("content")
             if isinstance(content, str) and content.strip():
-                return SpeechDecision(content=content.strip())
+                return content.strip()
+            return None
         text = raw_output.strip()
         if not text:
             return None
@@ -286,11 +364,12 @@ class LLMServiceClient:
             if parsed_fenced is not None:
                 content = parsed_fenced.get("content")
                 if isinstance(content, str) and content.strip():
-                    return SpeechDecision(content=content.strip())
+                    return content.strip()
+                return None
             text = fenced_text
         if text.startswith("输入：") or '"agent_id"' in text or '"public_state"' in text or '"legal_actions"' in text:
             return None
-        return SpeechDecision(content=text)
+        return text
 
     def _parse_vote_decision(self, raw_output: str, decision_input: AgentDecisionInput) -> VoteDecision | None:
         parsed = self._parse_json_object(raw_output)
@@ -360,6 +439,18 @@ class LLMServiceClient:
         target_id = targets[0] if targets else None
         skill = legal_actions.get("skill") or "default"
         return SkillDecision(skill=skill, target_id=target_id)
+
+    def _generate_mock_camp_chat(self, decision_input: AgentDecisionInput) -> str | None:
+        if decision_input.role != "狼人" or not decision_input.legal_actions.get("allowed", False):
+            return None
+        targets = decision_input.legal_actions.get("targets", [])
+        if not targets:
+            return "今晚先别乱动，我这边没有合适目标。"
+        target_id = targets[0]
+        teammates = decision_input.camp_shared_state.get("teammates", [])
+        if teammates:
+            return f"我建议今晚优先击杀{target_id}号，大家尽量统一票型。"
+        return f"今晚我倾向击杀{target_id}号。"
 
     def _generate_mock_speech(self, decision_input: AgentDecisionInput) -> SpeechDecision:
         public_events = decision_input.public_state.get("public_events", [])

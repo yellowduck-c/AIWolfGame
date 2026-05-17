@@ -16,6 +16,7 @@ class AgentDecisionInput:
     camp_shared_state: dict[str, Any]
     memory_summary: dict[str, Any]
     legal_actions: dict[str, Any]
+    derived_context: dict[str, Any] = field(default_factory=dict)
     specialization: dict[str, Any] = field(default_factory=dict)
 
 

@@ -12,6 +12,7 @@ type BackendEvent =
   | { event: 'GAME_RESET'; message?: string }
   | { event: 'AGENT_SPEAK_CHUNK'; id: number; role: string; content: string }
   | { event: 'AGENT_SPEAK'; id: number; role: string; content: string }
+  | { event: 'CAMP_CHAT'; camp: string; from_id: number; content: string }
   | {
       event: 'AGENT_STATUS_CHANGE'
       id: number
@@ -52,6 +53,13 @@ function handleEvent(event: BackendEvent): void {
     case 'AGENT_SPEAK':
       gameStore.appendSpeech(event)
       break
+    case 'CAMP_CHAT':
+      gameStore.appendSystemLog({
+        id: event.from_id,
+        role: `【${event.camp}私聊】`,
+        content: `${event.from_id} 号玩家：${event.content}`,
+      })
+      break
     case 'AGENT_STATUS_CHANGE':
       gameStore.updateAgentStatus(event)
       if (event.status === 'exiled' && event.revealed_role === '白痴') {
@@ -79,7 +87,7 @@ function handleEvent(event: BackendEvent): void {
       break
     }
     case 'PHASE_CHANGE':
-      gameStore.setPhase(event.phase)
+      gameStore.setPhase(event.phase, event.round)
       break
     case 'GAME_OVER':
       gameStore.setPhase('finished')

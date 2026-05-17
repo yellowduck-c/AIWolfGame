@@ -5,7 +5,12 @@ from collections.abc import Iterator
 
 from agent.core.registry import agent_registry
 from game_engine.decision_context import build_agent_decision_input
-from game_engine.events import build_phase_change_event, build_speak_chunk_event, build_speak_event
+from game_engine.events import (
+    build_phase_change_event,
+    build_public_speak_event,
+    build_speak_chunk_event,
+    build_speak_event,
+)
 from game_engine.models import GameSession
 from game_engine.state_machine import GameStateMachine
 
@@ -29,6 +34,7 @@ def stream_day_speech_action(
             agent_snapshot,
             agent,
             legal_actions={"type": "speak", "allowed": True},
+            visibility="public_only",
         )
         decision = agent.speak_streaming(decision_input)
         logger.info(
@@ -53,10 +59,20 @@ def stream_day_speech_action(
             role=agent_snapshot["role"],
             content=decision.content,
         )
-        session["public_events"].append(event)
+        session["public_events"].append(
+            build_public_speak_event(
+                agent_id=agent_snapshot["id"],
+                content=decision.content,
+            )
+        )
         for public_agent_snapshot in session["agents"]:
             public_agent = agent_registry.get_agent(session["game_id"], public_agent_snapshot["id"])
-            public_agent.observe_public_event(event)
+            public_agent.observe_public_event(
+                build_public_speak_event(
+                    agent_id=agent_snapshot["id"],
+                    content=decision.content,
+                )
+            )
         yield session, event
 
 

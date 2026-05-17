@@ -2,14 +2,14 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any, Literal
 
-from agent.roles.role_profiles import RoleActionGuidance, RoleProfile, get_role_profile
+from agent.roles.role_profiles import GLOBAL_BASE_RULE, RoleActionGuidance, RoleProfile, get_role_profile
 from agent.state.memory import AgentMemory
 from agent.state.schemas import AgentDecisionInput, SkillDecision, SpeechDecision, StreamingSpeechDecision, VoteDecision
 
 if TYPE_CHECKING:
     from llm_service.client import LLMServiceClient
 
-ActionType = Literal["speech", "vote", "skill"]
+ActionType = Literal["speech", "vote", "skill", "camp_chat"]
 
 
 class BaseAgent:
@@ -45,6 +45,8 @@ class BaseAgent:
             return profile.speech_guidance
         if action_type == "vote":
             return profile.vote_guidance
+        if action_type == "camp_chat":
+            return profile.camp_chat_guidance
         return profile.skill_guidance
 
     def _build_role_instruction(self, profile: RoleProfile) -> str:
@@ -55,17 +57,17 @@ class BaseAgent:
             f"你的协作风格：{profile.cooperation_style}",
         ]
         if profile.behavior_tags:
-            lines.append(f"行为标签：{', '.join(profile.behavior_tags)}")
+            lines.append("倾向：" + " / ".join(profile.behavior_tags))
         return "\n".join(lines)
 
     def _build_action_guidance_instruction(self, guidance: RoleActionGuidance) -> str:
         lines = [f"当前行动目标：{guidance.goal}"]
+        if guidance.tactics:
+            lines.append("可用策略：" + "；".join(guidance.tactics))
+        if guidance.style:
+            lines.append("行动风格：" + "、".join(guidance.style))
         if guidance.constraints:
             lines.append("行动约束：" + "；".join(guidance.constraints))
-        if guidance.priorities:
-            lines.append("行动优先级：" + "；".join(guidance.priorities))
-        if guidance.style:
-            lines.append("表达/决策风格：" + "、".join(guidance.style))
         return "\n".join(lines)
 
     def prepare_action_context(self, action_type: ActionType, decision_input: AgentDecisionInput) -> dict[str, Any]:
@@ -81,6 +83,7 @@ class BaseAgent:
                 "action_type": action_type,
                 "action_guidance": action_guidance.to_prompt_payload(),
                 "behavior_tags": list(profile.behavior_tags),
+                "global_rules_instruction": GLOBAL_BASE_RULE,
                 "role_instruction": self._build_role_instruction(profile),
                 "action_guidance_instruction": self._build_action_guidance_instruction(action_guidance),
             }
@@ -97,6 +100,7 @@ class BaseAgent:
             camp_shared_state=decision_input.camp_shared_state,
             memory_summary=decision_input.memory_summary,
             legal_actions=decision_input.legal_actions,
+            derived_context=decision_input.derived_context,
             specialization=specialization,
         )
 
@@ -136,3 +140,14 @@ class BaseAgent:
         decision = self.validate_or_normalize_result("skill", decision)
         self.memory.record_skill({"skill": decision.skill, "target_id": decision.target_id})
         return decision
+
+    def camp_chat(self, decision_input: AgentDecisionInput) -> str | None:
+        if self.role != "狼人" or not decision_input.legal_actions.get("allowed", False):
+            return None
+        enriched_input = self.enrich_decision_input("camp_chat", decision_input)
+        content = self.llm_client.generate_camp_chat(enriched_input)
+        content = self.validate_or_normalize_result("camp_chat", content)
+        if not isinstance(content, str):
+            return None
+        normalized = content.strip()
+        return normalized or None

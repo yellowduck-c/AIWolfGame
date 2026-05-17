@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import logging
+import random
+from collections import Counter
 from collections.abc import Iterator
 from typing import Any
 
@@ -13,7 +15,14 @@ from game_engine.decision_context import (
     build_agent_decision_input,
     build_skill_legal_actions,
 )
-from game_engine.events import build_game_over_event, build_phase_change_event, build_skill_event, build_status_change_event
+from game_engine.events import (
+    PRIVATE_EVENT_TYPES,
+    build_camp_chat_event,
+    build_game_over_event,
+    build_phase_change_event,
+    build_skill_event,
+    build_status_change_event,
+)
 from game_engine.models import GamePhase, GameSession
 from game_engine.state_machine import GameStateMachine
 
@@ -21,6 +30,17 @@ logger = logging.getLogger(__name__)
 
 NIGHT_ACTION_ORDER: tuple[str, ...] = ("狼人", "预言家", "女巫")
 NIGHT_ACTIVE_ROLES: frozenset[str] = frozenset(NIGHT_ACTION_ORDER)
+
+
+def _resolve_wolf_target(wolf_votes: list[int]) -> int | None:
+    if not wolf_votes:
+        return None
+    vote_counter = Counter(wolf_votes)
+    top_vote_count = max(vote_counter.values())
+    top_targets = [target_id for target_id, count in vote_counter.items() if count == top_vote_count]
+    if len(top_targets) == 1:
+        return top_targets[0]
+    return random.choice(top_targets)
 
 
 def stream_night_action(
@@ -32,12 +52,14 @@ def stream_night_action(
     yield session, build_phase_change_event(session)
 
     wolf_target_id: int | None = None
+    wolf_votes: list[int] = []
     witch_heal_used = False
     witch_poison_target_id: int | None = None
     session.pop("witch_potion_used", None)
 
-    def emit_public_event(event: dict[str, Any]) -> tuple[GameSession, dict[str, Any]]:
-        session["public_events"].append(event)
+    def emit_visible_event(event: dict[str, Any]) -> tuple[GameSession, dict[str, Any]]:
+        if event.get("event") not in PRIVATE_EVENT_TYPES:
+            session["public_events"].append(event)
         return session, event
 
     def emit_death(agent_id: int, *, cause: str) -> Iterator[tuple[GameSession, dict[str, Any]]]:
@@ -65,6 +87,10 @@ def stream_night_action(
 
         decision = hunter_agent.use_skill(decision_input)
         logger.info("hunter shot game_id=%s round=%s agent_id=%s target_id=%s", session["game_id"], session["round"], hunter_snapshot["id"], decision.target_id)
+        if decision.target_id is None or decision.target_id not in legal_actions["targets"]:
+            session.pop("hunter_pending_shot_id", None)
+            session.pop("hunter_pending_shot_cause", None)
+            return
         hunter_agent.observe_private_fact({"type": HUNTER_SHOT_FACT_TYPE, "round": session["round"], "target_id": decision.target_id})
         shot_event = build_skill_event(
             agent_id=hunter_snapshot["id"],
@@ -72,12 +98,10 @@ def stream_night_action(
             skill=decision.skill,
             target_id=decision.target_id,
         )
-        session["public_events"].append(shot_event)
+        if shot_event.get("event") not in PRIVATE_EVENT_TYPES:
+            session["public_events"].append(shot_event)
         yield session, shot_event
-        if decision.target_id is not None:
-            target_snapshot = next(agent for agent in session["agents"] if agent["id"] == decision.target_id)
-            if target_snapshot["status"] == "alive":
-                yield from emit_death(decision.target_id, cause="hunter_shot")
+        yield from emit_death(decision.target_id, cause="hunter_shot")
         session.pop("hunter_pending_shot_id", None)
         session.pop("hunter_pending_shot_cause", None)
 
@@ -87,6 +111,82 @@ def stream_night_action(
         for agent_snapshot in session["agents"]
         if agent_snapshot["status"] == "alive" and agent_snapshot["role"] == role
     ]
+    last_wolf_agent_id = next(
+        (agent_snapshot["id"] for agent_snapshot in reversed(ordered_active_agents) if agent_snapshot["role"] == "狼人"),
+        None,
+    )
+
+    # Wolf camp private chat round (not public)
+    alive_wolves = [a for a in session["agents"] if a["status"] == "alive" and a["role"] == "狼人"]
+    if alive_wolves:
+        teammate_ids = [a["id"] for a in alive_wolves]
+        logger.info(
+            "wolf camp chat phase started game_id=%s round=%s alive_wolf_ids=%s",
+            session["game_id"],
+            session["round"],
+            teammate_ids,
+        )
+        for agent_snapshot in alive_wolves:
+            agent = agent_registry.get_agent(session["game_id"], agent_snapshot["id"])
+            legal_actions = {"type": "camp_chat", "allowed": len(teammate_ids) > 1, "audience": [i for i in teammate_ids if i != agent_snapshot["id"]]}
+            decision_input = build_agent_decision_input(session, agent_snapshot, agent, legal_actions=legal_actions)
+            if not legal_actions["allowed"]:
+                logger.info(
+                    "wolf camp chat skipped game_id=%s round=%s agent_id=%s reason=no_teammate",
+                    session["game_id"],
+                    session["round"],
+                    agent_snapshot["id"],
+                )
+                continue
+            chat_func = getattr(agent, "camp_chat", None)
+            if not callable(chat_func):
+                logger.info(
+                    "wolf camp chat skipped game_id=%s round=%s agent_id=%s reason=missing_callable",
+                    session["game_id"],
+                    session["round"],
+                    agent_snapshot["id"],
+                )
+                continue
+            logger.info(
+                "wolf camp chat attempt game_id=%s round=%s agent_id=%s audience=%s",
+                session["game_id"],
+                session["round"],
+                agent_snapshot["id"],
+                legal_actions["audience"],
+            )
+            content = chat_func(decision_input)
+            if content:
+                logger.info(
+                    "wolf camp chat generated game_id=%s round=%s agent_id=%s content_chars=%s",
+                    session["game_id"],
+                    session["round"],
+                    agent_snapshot["id"],
+                    len(content),
+                )
+                session.setdefault("camp_private_logs", {}).setdefault("狼人", []).append({
+                    "round": session["round"],
+                    "from_id": agent_snapshot["id"],
+                    "content": content,
+                })
+
+                # Spectator-visible only: emit to stream without writing into public_events
+                yield session, build_camp_chat_event(camp="狼人", from_id=agent_snapshot["id"], content=content)
+
+                for teammate in alive_wolves:
+                    teammate_agent = agent_registry.get_agent(session["game_id"], teammate["id"])
+                    teammate_agent.observe_private_fact({
+                        "type": "camp_chat_observed",
+                        "round": session["round"],
+                        "from_id": agent_snapshot["id"],
+                        "content": content,
+                    })
+            else:
+                logger.info(
+                    "wolf camp chat empty game_id=%s round=%s agent_id=%s",
+                    session["game_id"],
+                    session["round"],
+                    agent_snapshot["id"],
+                )
 
     for agent_snapshot in ordered_active_agents:
         agent = agent_registry.get_agent(session["game_id"], agent_snapshot["id"])
@@ -96,6 +196,15 @@ def stream_night_action(
             decision_input = build_agent_decision_input(session, agent_snapshot, agent, legal_actions=legal_actions)
             if not decision_input.legal_actions["allowed"]:
                 continue
+            camp_chat_history = decision_input.camp_shared_state.get("camp_chat_history", [])
+            logger.info(
+                "wolf kill decision context game_id=%s round=%s agent_id=%s chat_history_count=%s latest_chat=%s",
+                session["game_id"],
+                session["round"],
+                agent_snapshot["id"],
+                len(camp_chat_history),
+                camp_chat_history[-1] if camp_chat_history else None,
+            )
             decision = agent.use_skill(decision_input)
             logger.info("night action game_id=%s round=%s agent_id=%s role=%s skill=%s target_id=%s", session["game_id"], session["round"], agent_snapshot["id"], agent_snapshot["role"], decision.skill, decision.target_id)
             skill_event = build_skill_event(
@@ -104,10 +213,13 @@ def stream_night_action(
                 skill=decision.skill,
                 target_id=decision.target_id,
             )
-            if decision.target_id is not None and wolf_target_id is None:
-                wolf_target_id = decision.target_id
-                session["night_pending_target_id"] = wolf_target_id
-            yield emit_public_event(skill_event)
+            if decision.target_id is not None:
+                wolf_votes.append(decision.target_id)
+            yield emit_visible_event(skill_event)
+            if agent_snapshot["id"] == last_wolf_agent_id:
+                wolf_target_id = _resolve_wolf_target(wolf_votes)
+                if wolf_target_id is not None:
+                    session["night_pending_target_id"] = wolf_target_id
             continue
 
         if agent_snapshot["role"] == "预言家":
@@ -134,7 +246,7 @@ def stream_night_action(
                         "camp": inspected_snapshot["camp"],
                     }
                 )
-            yield emit_public_event(skill_event)
+            yield emit_visible_event(skill_event)
             continue
 
         legal_actions = build_skill_legal_actions(session, agent_snapshot, agent)
@@ -153,7 +265,7 @@ def stream_night_action(
                 skill="heal",
                 target_id=legal_actions["wolf_target_id"],
             )
-            yield emit_public_event(heal_event)
+            yield emit_visible_event(heal_event)
             continue
 
         poison_target_id = decision.target_id if decision.skill == "poison" else None
@@ -173,7 +285,11 @@ def stream_night_action(
             skill=decision.skill,
             target_id=poison_target_id,
         )
-        yield emit_public_event(poison_event)
+        yield emit_visible_event(poison_event)
+
+    wolf_target_id = _resolve_wolf_target(wolf_votes)
+    if wolf_target_id is not None:
+        session["night_pending_target_id"] = wolf_target_id
 
     eliminated_agent_ids: list[int] = []
     if wolf_target_id is not None and not witch_heal_used:

@@ -6,7 +6,7 @@ from collections.abc import Iterator
 
 from agent.core.registry import agent_registry
 from game_engine.decision_context import HUNTER_SHOT_FACT_TYPE, build_agent_decision_input, build_skill_legal_actions, build_vote_legal_actions
-from game_engine.events import build_game_over_event, build_phase_change_event, build_skill_event, build_status_change_event, build_vote_event
+from game_engine.events import PRIVATE_EVENT_TYPES, build_game_over_event, build_phase_change_event, build_public_status_change_event, build_skill_event, build_status_change_event, build_vote_event
 from game_engine.models import GameSession
 from game_engine.state_machine import GameStateMachine
 
@@ -52,10 +52,20 @@ def stream_voting_action(
             is_alive=True,
             special="idiot_revealed",
         )
-        session["public_events"].append(status_event)
+        public_status_event = build_public_status_change_event(
+            agent_id=agent_id,
+            status="exiled",
+            role="白痴",
+            revealed_role="白痴",
+            can_vote=False,
+            can_speak=False,
+            is_alive=True,
+            special="idiot_revealed",
+        )
+        session["public_events"].append(public_status_event)
         for agent_snapshot in session["agents"]:
             agent = agent_registry.get_agent(session["game_id"], agent_snapshot["id"])
-            agent.observe_public_event(status_event)
+            agent.observe_public_event(public_status_event)
         yield session, status_event
 
     def resolve_hunter_shot(agent_id: int) -> Iterator[tuple[GameSession, dict[str, object]]]:
@@ -72,6 +82,10 @@ def stream_voting_action(
 
         decision = hunter_agent.use_skill(decision_input)
         logger.info("hunter shot game_id=%s round=%s agent_id=%s target_id=%s", session["game_id"], session["round"], hunter_snapshot["id"], decision.target_id)
+        if decision.target_id is None or decision.target_id not in legal_actions["targets"]:
+            session.pop("hunter_pending_shot_id", None)
+            session.pop("hunter_pending_shot_cause", None)
+            return
         hunter_agent.observe_private_fact({"type": HUNTER_SHOT_FACT_TYPE, "round": session["round"], "target_id": decision.target_id})
         shot_event = build_skill_event(
             agent_id=hunter_snapshot["id"],
@@ -79,12 +93,10 @@ def stream_voting_action(
             skill=decision.skill,
             target_id=decision.target_id,
         )
-        session["public_events"].append(shot_event)
+        if shot_event.get("event") not in PRIVATE_EVENT_TYPES:
+            session["public_events"].append(shot_event)
         yield session, shot_event
-        if decision.target_id is not None:
-            target_snapshot = next(agent for agent in session["agents"] if agent["id"] == decision.target_id)
-            if target_snapshot["status"] == "alive":
-                yield from emit_death(decision.target_id)
+        yield from emit_death(decision.target_id)
         session.pop("hunter_pending_shot_id", None)
         session.pop("hunter_pending_shot_cause", None)
 
@@ -97,6 +109,7 @@ def stream_voting_action(
             agent_snapshot,
             agent,
             legal_actions=build_vote_legal_actions(session, agent_snapshot),
+            visibility="public_only",
         )
         decision = agent.vote(decision_input)
         logger.info("vote cast game_id=%s round=%s agent_id=%s target_id=%s", session["game_id"], session["round"], agent_snapshot["id"], decision.target_id)

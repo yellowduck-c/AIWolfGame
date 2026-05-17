@@ -13,6 +13,8 @@ export type Agent = {
   status: AgentStatus
   currentSpeech: string
   speechHistory: string[]
+  speechHistoryRound: number | null
+  previousRoundSpeechHistory: string[]
   playerType: 'ai' | 'human'
   displayName: string
   visibleRole: string
@@ -93,18 +95,18 @@ const DEFAULT_ROLE_CONFIGS: Record<number, RoleConfig> = {
 }
 
 const MOCK_AGENT_POOL: MockAgentTemplate[] = [
-  { id: 1, status: 'alive', currentSpeech: '', speechHistory: [], canVote: true, canSpeak: true, isAlive: true, revealedRole: null, statusLabel: '存活' },
-  { id: 2, status: 'alive', currentSpeech: '', speechHistory: [], canVote: true, canSpeak: true, isAlive: true, revealedRole: null, statusLabel: '存活' },
-  { id: 3, status: 'alive', currentSpeech: '', speechHistory: [], canVote: true, canSpeak: true, isAlive: true, revealedRole: null, statusLabel: '存活' },
-  { id: 4, status: 'alive', currentSpeech: '', speechHistory: [], canVote: true, canSpeak: true, isAlive: true, revealedRole: null, statusLabel: '存活' },
-  { id: 5, status: 'alive', currentSpeech: '', speechHistory: [], canVote: true, canSpeak: true, isAlive: true, revealedRole: null, statusLabel: '存活' },
-  { id: 6, status: 'alive', currentSpeech: '', speechHistory: [], canVote: true, canSpeak: true, isAlive: true, revealedRole: null, statusLabel: '存活' },
-  { id: 7, status: 'alive', currentSpeech: '', speechHistory: [], canVote: true, canSpeak: true, isAlive: true, revealedRole: null, statusLabel: '存活' },
-  { id: 8, status: 'alive', currentSpeech: '', speechHistory: [], canVote: true, canSpeak: true, isAlive: true, revealedRole: null, statusLabel: '存活' },
-  { id: 9, status: 'alive', currentSpeech: '', speechHistory: [], canVote: true, canSpeak: true, isAlive: true, revealedRole: null, statusLabel: '存活' },
-  { id: 10, status: 'alive', currentSpeech: '', speechHistory: [], canVote: true, canSpeak: true, isAlive: true, revealedRole: null, statusLabel: '存活' },
-  { id: 11, status: 'alive', currentSpeech: '', speechHistory: [], canVote: true, canSpeak: true, isAlive: true, revealedRole: null, statusLabel: '存活' },
-  { id: 12, status: 'alive', currentSpeech: '', speechHistory: [], canVote: true, canSpeak: true, isAlive: true, revealedRole: null, statusLabel: '存活' },
+  { id: 1, status: 'alive', currentSpeech: '', speechHistory: [], speechHistoryRound: null, previousRoundSpeechHistory: [], canVote: true, canSpeak: true, isAlive: true, revealedRole: null, statusLabel: '存活' },
+  { id: 2, status: 'alive', currentSpeech: '', speechHistory: [], speechHistoryRound: null, previousRoundSpeechHistory: [], canVote: true, canSpeak: true, isAlive: true, revealedRole: null, statusLabel: '存活' },
+  { id: 3, status: 'alive', currentSpeech: '', speechHistory: [], speechHistoryRound: null, previousRoundSpeechHistory: [], canVote: true, canSpeak: true, isAlive: true, revealedRole: null, statusLabel: '存活' },
+  { id: 4, status: 'alive', currentSpeech: '', speechHistory: [], speechHistoryRound: null, previousRoundSpeechHistory: [], canVote: true, canSpeak: true, isAlive: true, revealedRole: null, statusLabel: '存活' },
+  { id: 5, status: 'alive', currentSpeech: '', speechHistory: [], speechHistoryRound: null, previousRoundSpeechHistory: [], canVote: true, canSpeak: true, isAlive: true, revealedRole: null, statusLabel: '存活' },
+  { id: 6, status: 'alive', currentSpeech: '', speechHistory: [], speechHistoryRound: null, previousRoundSpeechHistory: [], canVote: true, canSpeak: true, isAlive: true, revealedRole: null, statusLabel: '存活' },
+  { id: 7, status: 'alive', currentSpeech: '', speechHistory: [], speechHistoryRound: null, previousRoundSpeechHistory: [], canVote: true, canSpeak: true, isAlive: true, revealedRole: null, statusLabel: '存活' },
+  { id: 8, status: 'alive', currentSpeech: '', speechHistory: [], speechHistoryRound: null, previousRoundSpeechHistory: [], canVote: true, canSpeak: true, isAlive: true, revealedRole: null, statusLabel: '存活' },
+  { id: 9, status: 'alive', currentSpeech: '', speechHistory: [], speechHistoryRound: null, previousRoundSpeechHistory: [], canVote: true, canSpeak: true, isAlive: true, revealedRole: null, statusLabel: '存活' },
+  { id: 10, status: 'alive', currentSpeech: '', speechHistory: [], speechHistoryRound: null, previousRoundSpeechHistory: [], canVote: true, canSpeak: true, isAlive: true, revealedRole: null, statusLabel: '存活' },
+  { id: 11, status: 'alive', currentSpeech: '', speechHistory: [], speechHistoryRound: null, previousRoundSpeechHistory: [], canVote: true, canSpeak: true, isAlive: true, revealedRole: null, statusLabel: '存活' },
+  { id: 12, status: 'alive', currentSpeech: '', speechHistory: [], speechHistoryRound: null, previousRoundSpeechHistory: [], canVote: true, canSpeak: true, isAlive: true, revealedRole: null, statusLabel: '存活' },
 ]
 
 function cloneRoleConfig(playerCount: number): RoleConfig {
@@ -176,6 +178,8 @@ function createMockAgentsFromAssignments(assignedRoles: AssignedRole[], gameMode
       status: 'alive',
       currentSpeech: '',
       speechHistory: [],
+      speechHistoryRound: null,
+      previousRoundSpeechHistory: [],
       playerType: isHuman ? 'human' : 'ai',
       displayName: isHuman ? '1 号玩家（人类）' : `${agent.id} 号玩家（AI）`,
       visibleRole,
@@ -206,6 +210,8 @@ function createEmptyAgents(playerCount: number, gameMode: GameMode): Agent[] {
       status: 'alive',
       currentSpeech: '',
       speechHistory: [],
+      speechHistoryRound: null,
+      previousRoundSpeechHistory: [],
       playerType: isHuman ? 'human' : 'ai',
       displayName: isHuman ? '1 号玩家（人类）' : `${agent.id} 号玩家（AI）`,
       visibleRole: '',
@@ -305,6 +311,7 @@ export const useGameStore = defineStore('game', () => {
   const agents = ref<Agent[]>(createMockAgents(configuredPlayerCount.value, configuredRoleCounts.value, false, gameMode.value))
   const speakLogs = ref<SpeakLogEntry[]>(createMockLogs(agents.value))
   const currentPhase = ref('day_speech')
+  const currentRound = ref(1)
   const currentGameId = ref('')
   const winner = ref('')
   const connectionStatus = ref<ConnectionStatus>('disconnected')
@@ -359,6 +366,7 @@ export const useGameStore = defineStore('game', () => {
     winner.value = ''
     currentGameId.value = ''
     currentPhase.value = 'day_speech'
+    currentRound.value = 1
     pendingCommand.value = ''
     liveGameStarted.value = false
     humanSpeechDraft.value = ''
@@ -372,8 +380,42 @@ export const useGameStore = defineStore('game', () => {
     connectionMessage.value = message
   }
 
-  function setPhase(phase: string): void {
+  function setPhase(phase: string, round?: number): void {
+    const previousRound = currentRound.value
+    const previousPhase = currentPhase.value
     currentPhase.value = phase
+    if (typeof round === 'number' && Number.isFinite(round)) {
+      currentRound.value = round
+    }
+    if (phase === 'day_speech' && (currentRound.value !== previousRound || previousPhase !== 'day_speech')) {
+      agents.value = agents.value.map((agent) => {
+        if (currentRound.value <= 1) {
+          return {
+            ...agent,
+            currentSpeech: '',
+            previousRoundSpeechHistory: [],
+            speechHistory: [],
+            speechHistoryRound: currentRound.value,
+          }
+        }
+
+        if (currentRound.value !== previousRound) {
+          return {
+            ...agent,
+            currentSpeech: '',
+            previousRoundSpeechHistory: agent.speechHistoryRound === previousRound ? [...agent.speechHistory] : [],
+            speechHistory: [],
+            speechHistoryRound: currentRound.value,
+          }
+        }
+
+        return {
+          ...agent,
+          currentSpeech: '',
+          previousRoundSpeechHistory: agent.speechHistoryRound === currentRound.value - 1 ? [...agent.speechHistory] : agent.previousRoundSpeechHistory,
+        }
+      })
+    }
   }
 
   function setCurrentGameId(gameId: string): void {
@@ -454,6 +496,7 @@ export const useGameStore = defineStore('game', () => {
     configuredPlayerCount.value = nextAgents.length
     configuredRoleCounts.value = cloneRoleConfig(nextAgents.length)
     currentPhase.value = 'night'
+    currentRound.value = 1
     winner.value = ''
     speakLogs.value = []
     liveGameStarted.value = true
@@ -462,6 +505,8 @@ export const useGameStore = defineStore('game', () => {
       ...agent,
       currentSpeech: '',
       speechHistory: [],
+      speechHistoryRound: null,
+      previousRoundSpeechHistory: [],
       playerType: gameMode.value === 'human_mixed' && agent.id === 1 ? 'human' : 'ai',
       displayName: gameMode.value === 'human_mixed' && agent.id === 1 ? '1 号玩家（人类）' : `${agent.id} 号玩家（AI）`,
       visibleRole: agent.role,
@@ -479,6 +524,7 @@ export const useGameStore = defineStore('game', () => {
     agents.value = createEmptyAgents(configuredPlayerCount.value, gameMode.value)
     speakLogs.value = []
     currentPhase.value = ''
+    currentRound.value = 1
     currentGameId.value = ''
     winner.value = ''
     pendingCommand.value = ''
@@ -504,16 +550,19 @@ export const useGameStore = defineStore('game', () => {
 
   function appendSpeech(payload: { id: number; role: string; content: string }): void {
     const timestamp = new Date().toLocaleTimeString('zh-CN', { hour12: false })
+    const historyRound = currentRound.value
 
     agents.value = agents.value.map((agent) => {
       if (agent.id !== payload.id) {
         return agent
       }
 
+      const sameRoundHistory = agent.speechHistoryRound === historyRound ? agent.speechHistory : []
       return {
         ...agent,
         currentSpeech: payload.content,
-        speechHistory: [payload.content, ...agent.speechHistory].slice(0, 5),
+        speechHistoryRound: historyRound,
+        speechHistory: [payload.content, ...sameRoundHistory],
       }
     })
 
@@ -684,6 +733,7 @@ export const useGameStore = defineStore('game', () => {
     agents,
     speakLogs,
     currentPhase,
+    currentRound,
     currentGameId,
     winner,
     connectionStatus,

@@ -43,8 +43,8 @@ const props = defineProps<{
 
     <section class="history-box">
       <h4>最近发言</h4>
-      <ul v-if="props.agent.speechHistory.length > 0">
-        <li v-for="speech in props.agent.speechHistory" :key="speech">
+      <ul v-if="props.agent.previousRoundSpeechHistory.length > 0">
+        <li v-for="speech in props.agent.previousRoundSpeechHistory" :key="speech">
           {{ speech }}
         </li>
       </ul>

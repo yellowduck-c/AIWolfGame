@@ -1,24 +1,25 @@
-
-
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field
 from typing import Any
 
 
+GLOBAL_BASE_RULE = "别把自己没真正拿到的技能结果、隐藏事件或私下观察说成已经坐实的事实；其余伪装、试探、摇摆和博弈都可以灵活发挥。"
+
+
 @dataclass(frozen=True, slots=True)
 class RoleActionGuidance:
     goal: str
-    constraints: tuple[str, ...] = ()
-    priorities: tuple[str, ...] = ()
+    tactics: tuple[str, ...] = ()
     style: tuple[str, ...] = ()
+    constraints: tuple[str, ...] = ()
 
     def to_prompt_payload(self) -> dict[str, Any]:
         return {
             "goal": self.goal,
-            "constraints": list(self.constraints),
-            "priorities": list(self.priorities),
+            "tactics": list(self.tactics),
             "style": list(self.style),
+            "constraints": list(self.constraints),
         }
 
 
@@ -34,6 +35,7 @@ class RoleProfile:
     speech_guidance: RoleActionGuidance = field(default_factory=lambda: RoleActionGuidance(goal="基于公开信息进行简短发言"))
     vote_guidance: RoleActionGuidance = field(default_factory=lambda: RoleActionGuidance(goal="从合法候选人中选择最符合身份目标的投票对象"))
     skill_guidance: RoleActionGuidance = field(default_factory=lambda: RoleActionGuidance(goal="仅在 legal_actions 允许范围内使用技能"))
+    camp_chat_guidance: RoleActionGuidance = field(default_factory=lambda: RoleActionGuidance(goal="仅在允许时向同阵营发送一句简短私聊"))
 
     def to_prompt_payload(self) -> dict[str, Any]:
         payload = asdict(self)
@@ -41,175 +43,188 @@ class RoleProfile:
         payload["speech_guidance"] = self.speech_guidance.to_prompt_payload()
         payload["vote_guidance"] = self.vote_guidance.to_prompt_payload()
         payload["skill_guidance"] = self.skill_guidance.to_prompt_payload()
+        payload["camp_chat_guidance"] = self.camp_chat_guidance.to_prompt_payload()
         return payload
 
 
 WEREWOLF_PROFILE = RoleProfile(
     role="狼人",
     camp="werewolf",
-    identity="夜间与同伴协作、白天隐藏身份的狼人",
-    objective="帮助狼人阵营存活并逐步淘汰好人阵营。",
-    disclosure_policy="绝不主动暴露狼人身份，不要捏造自己没有得到的信息。",
-    cooperation_style="参考狼人共享信息进行协作，但公开发言时保持伪装与误导。",
+    identity="白天装好人、夜里和同伴找刀口的狼人。",
+    objective="帮狼人阵营隐藏身份。可以伪装成神职，骗取好人的信任。",
+    disclosure_policy="可以误导、换边、带节奏，但别把没坐实的夜间信息说成铁事实。",
+    cooperation_style="夜里先统一目标，白天自然隐藏身份，不轻易露出狼队配合痕迹。",
     behavior_tags=("deceptive", "coordinated", "survival_first"),
     speech_guidance=RoleActionGuidance(
-        goal="像普通村民一样自然发言，推动怀疑落在非狼人目标上。",
-        constraints=("不能暴露狼人夜间共享信息来源", "只基于 public_state、private_state 与 camp_shared_state 发言"),
-        priorities=("优先保护狼人同伴", "优先制造合理怀疑", "避免发言过度绝对"),
-        style=("简短", "自然", "带一点试探"),
+        goal="顺着场上节奏自然发言，把怀疑往对狼人更有利的方向带。"
+             "如果受到怀疑，要进行反驳和质疑，可以踩其他人的身份。"
+             "可以伪装成预言家等神职，骗取好人的信任。"
+             "发言不能太圆滑，必要时给出确定性发言，肯定或者踩其他人的身份。",
+        tactics=("悍跳预言家", "顺势跟票", "试探施压"),
+        style=("自然", "留余地", "谨慎"),
+        constraints=("不要暴露狼人夜间共享信息的真实来源",),
     ),
     vote_guidance=RoleActionGuidance(
-        goal="从合法候选人中选择最有利于狼人阵营的放逐目标。",
-        constraints=("不能投给不在 candidates 中的目标",),
-        priorities=("避免票型直接暴露狼人同伴", "优先淘汰对狼人威胁大的角色", "必要时跟随场上主流票型自保"),
+        goal="从合法候选人中选择最有利于狼人阵营的放逐目标，并尽量别让票型直接卖出同伴。",
+        tactics=("跟随主流票型", "战术性分票", "顺势补票"),
         style=("隐蔽", "务实"),
+        constraints=("不能投给不在 candidates 中的目标",),
     ),
     skill_guidance=RoleActionGuidance(
-        goal="夜晚选择对狼人阵营收益最高的袭击目标。",
-        constraints=("必须遵守 legal_actions",),
-        priorities=("优先击杀高价值好人角色", "尽量避开明显会暴露同伴意图的选择"),
+        goal="夜晚优先执行狼队共识刀口；没有明确共识时再选择对狼人阵营收益最高的目标。",
+        tactics=("跟随共识刀口", "无共识时自主抿神", "必要时保守落刀"),
         style=("果断", "协作"),
+        constraints=("必须遵守 legal_actions", "若 camp_shared_state 已出现明确共同目标，优先执行该共识"),
+    ),
+    camp_chat_guidance=RoleActionGuidance(
+        goal="在夜间快速交换判断，帮助同伴形成短而明确的统一行动方案。",
+        tactics=("提议目标", "响应同伴目标", "补充白天分工"),
+        style=("简短", "战术性", "协作"),
+        constraints=("只基于真实已知信息私聊", "内容尽量一句话且可执行"),
     ),
 )
 
 SEER_PROFILE = RoleProfile(
     role="预言家",
     camp="villager",
-    identity="拥有查验能力、需要逐步建立公信力的预言家",
-    objective="通过查验和公开推理帮助好人阵营识别狼人。",
-    disclosure_policy="是否跳身份取决于局势，但发言必须与已知信息一致。",
-    cooperation_style="围绕查验结果与公开发言建立可信推理链。",
+    identity="手里有真查验、但得慢慢把人带明白的预言家。",
+    objective="靠真实查验和公开推理帮好人把狼人找出来。获取好人阵营的信任",
+    disclosure_policy="在局势不明朗的情况下，可以伪装成普通村民。"
+                      "获取有利查验信息后，可以考虑公开身份，获取好人信任。",
+    cooperation_style="围着真实结果组织发言，用公开逻辑一点点把可信度打出来。",
     behavior_tags=("informational", "analytical", "credibility_sensitive"),
     speech_guidance=RoleActionGuidance(
-        goal="结合查验结果和公开事件输出可信、克制的判断。",
-        constraints=("不能虚构查验结果", "不能引用自己没有获得的私有信息"),
-        priorities=("优先传达真实查验线索", "优先建立发言可信度", "必要时点明重点怀疑对象"),
+        goal="结合真实查验结果与公开事件输出可信、克制、能带动站边的判断。"
+             "要保护自己不被狼人刀，可以伪装成村民，也可以要求女巫的解药资源",
+        tactics=("延后爆信息", "保留部分推理链", "先用公开逻辑试探"),
         style=("理性", "克制", "有条理"),
+        constraints=("不要把猜测包装成查验结果",),
     ),
     vote_guidance=RoleActionGuidance(
-        goal="优先票出最可疑或与查验结果冲突的目标。",
-        constraints=("只能从 candidates 中选择",),
-        priorities=("优先处理查杀或高嫌疑目标", "避免无依据摇摆"),
+        goal="优先票出与真实查验结果或公开逻辑最冲突的目标，帮助好人收束票型。",
+        tactics=("公开归票", "保留次级怀疑位"),
         style=("明确", "稳定"),
+        constraints=("只能从 candidates 中选择",),
     ),
     skill_guidance=RoleActionGuidance(
-        goal="夜晚查验最能推进局势判断的目标。",
-        constraints=("只能选择 legal_actions.targets 中的目标",),
-        priorities=("优先查验高影响力或高嫌疑目标", "避免重复无效查验"),
+        goal="夜晚查验最能推进局势判断的目标，最大化下一轮公开信息价值。",
+        tactics=("查验焦点位", "查验摇摆位"),
         style=("审慎", "信息优先"),
+        constraints=("只能选择 legal_actions.targets 中的目标",),
     ),
 )
 
 WITCH_PROFILE = RoleProfile(
     role="女巫",
     camp="villager",
-    identity="持有解药与毒药、需要权衡资源使用时机的女巫",
-    objective="用有限药剂最大化好人阵营收益。",
-    disclosure_policy="不轻易暴露药剂信息与身份，除非局势需要。",
-    cooperation_style="根据夜间结果和白天局势保留关键资源。",
+    identity="手里药不多、出手时机很关键的女巫。",
+    objective="把两瓶药用在最值的地方，拯救关键神职，毒杀最可能的狼，尽量不要浪费资源。"
+              "可以伪装其他神职来迷惑狼人",
+    disclosure_policy="可以藏身份，也可以藏自己到底有没有动药，但别把没发生的夜间结果说成真事。",
+    cooperation_style="先看夜里拿到的真实信息，再结合白天局势决定要不要出手。",
     behavior_tags=("resource_management", "reactive", "swing_role"),
     speech_guidance=RoleActionGuidance(
-        goal="发言时像掌握有限关键信息的好人，谨慎表达立场。",
-        constraints=("不要凭空声称自己救人或毒人",),
-        priorities=("避免过早暴露女巫身份", "优先保留局势判断空间"),
-        style=("谨慎", "稳健"),
+        goal="像掌握有限关键判断的好人一样谨慎表达立场，参与局势判断但不过早暴露资源位。"
+             "可以保护预言家。",
+        tactics=("隐藏资源信息", "弱化夜间线索", "顺着公开逻辑发言"),
+        style=("谨慎", "稳健", "保留空间"),
+        constraints=("不要暴露自己掌握的私有夜间信息来源",),
     ),
     vote_guidance=RoleActionGuidance(
-        goal="投票支持对好人阵营最有利的放逐结果。",
-        constraints=("只能从 candidates 中选择",),
-        priorities=("优先票出高嫌疑狼人", "避免因为情绪浪费票权"),
+        goal="投票支持对好人阵营最有利的放逐结果，并兼顾关键资源位的存活收益。",
+        tactics=("跟随可信归票", "保留次级怀疑"),
         style=("稳妥", "结果导向"),
+        constraints=("只能从 candidates 中选择",),
     ),
     skill_guidance=RoleActionGuidance(
-        goal="在解药与毒药之间做出收益最大的选择。",
-        constraints=("只可选择 legal_actions 允许的 skill 和 target_id", "若无合适收益可选择 skip"),
-        priorities=("解药优先保护关键好人", "毒药优先处理高确定性狼人", "避免无把握时浪费药剂"),
+        goal="在解药与毒药之间做出收益最大的选择，必要时选择 skip 保留后手。",
+        tactics=("先保资源", "延后出手", "集中处理高威胁位"),
         style=("克制", "权衡收益"),
+        constraints=("只可选择 legal_actions 允许的 skill 和 target_id",),
     ),
 )
 
 HUNTER_PROFILE = RoleProfile(
     role="猎人",
     camp="villager",
-    identity="死亡时可能开枪带走目标的猎人",
-    objective="通过白天判断与死亡反击帮助好人阵营。",
-    disclosure_policy="平时可低调，但在关键时刻要做出明确表态。",
-    cooperation_style="白天参与推理，临死技能追求高价值交换。",
+    identity="平时正常聊，真到要开枪时追求高交换的猎人。",
+    objective="白天稳住判断，关键时刻尽量一枪换出价值。可以伪装其他神职来迷惑狼人",
+    disclosure_policy="可以藏身份和锋芒，但别把没开过的枪或没拿到的私有结果说成已经发生。",
+    cooperation_style="平时像普通好人一样站边，真到生死节点再果断处理高威胁目标。",
     behavior_tags=("threat_response", "retaliatory", "decisive"),
     speech_guidance=RoleActionGuidance(
-        goal="正常参与发言，并在关键时刻给出明确站边。",
-        constraints=("不能虚构身份信息",),
-        priorities=("优先表达对高嫌疑目标的判断", "避免无意义摇摆"),
+        goal="正常参与发言并在关键节点给出明确站边，同时保持公开逻辑自然一致。",
+        tactics=("保留身份", "关键时刻强表态", "公开施压"),
         style=("直接", "简洁"),
+        constraints=("不要无信息硬跳结论",),
     ),
     vote_guidance=RoleActionGuidance(
-        goal="票出最像狼、且对局势威胁最大的目标。",
-        constraints=("只能从 candidates 中选择",),
-        priorities=("优先高嫌疑狼人", "必要时保护关键神职"),
+        goal="票出最像狼、且对局势威胁最大的目标，同时维持自己公开站边的一致性。",
+        tactics=("跟随可信归票", "在关键票位主动定调"),
         style=("明确", "果断"),
+        constraints=("只能从 candidates 中选择",),
     ),
     skill_guidance=RoleActionGuidance(
-        goal="开枪时尽量带走最可能的狼人或最危险目标。",
+        goal="开枪时尽量带走最可能的狼人或最危险目标，最大化交换价值。",
+        tactics=("优先处理场上核心威胁", "在不确定时选最高风险位"),
+        style=("果断", "价值交换导向"),
         constraints=("只能按 legal_actions 选择目标",),
-        priorities=("优先高确定性狼人", "避免误伤明显好人"),
-        style=("果断", "以交换价值为核心"),
     ),
 )
 
 VILLAGER_PROFILE = RoleProfile(
     role="村民",
     camp="villager",
-    identity="只能依据公开信息推理的普通村民",
-    objective="通过公开发言、投票和一致性判断帮助好人阵营找狼。",
-    disclosure_policy="只基于公开信息表达判断，不冒充神职。",
-    cooperation_style="围绕公开发言和行为一致性进行推理。",
+    identity="没有夜间信息、只能靠场上发言和行为去抿人的普通好人。",
+    objective="用公开信息把狼人找出来，并通过发言和投票帮好人形成共识。可以伪装神职来迷惑狼人",
+    disclosure_policy="可以试探、保留，也可以做公开层面的身份博弈，可以伪造身份和技能结果。",
+    cooperation_style="围着公开事实、发言逻辑和票型一致性去判断谁更像狼。",
     behavior_tags=("public_reasoning", "consistency_checking", "plain_town"),
     speech_guidance=RoleActionGuidance(
-        goal="基于公开发言和事件给出朴素、可信的好人视角判断。",
-        constraints=("不能声称拥有查验或夜间信息",),
-        priorities=("优先指出发言矛盾", "优先表达当前怀疑与理由"),
+        goal="基于公开发言和事件给出朴素、可信、带理由的好人视角判断。",
+        tactics=("试探性施压", "保留意见", "公开跟逻辑站边"),
         style=("自然", "朴素", "简短"),
+        constraints=("不要像神职播报结果一样发言",),
     ),
     vote_guidance=RoleActionGuidance(
-        goal="从 candidates 中投给公开表现最可疑的目标。",
-        constraints=("只能从 candidates 中选择",),
-        priorities=("优先行为矛盾最多者", "避免完全随机"),
+        goal="从 candidates 中投给公开表现最可疑、最不一致的目标。",
+        tactics=("跟随更可信的公开推理", "保留次级嫌疑位"),
         style=("直接", "一致"),
+        constraints=("只能从 candidates 中选择",),
     ),
     skill_guidance=RoleActionGuidance(
-        goal="如果没有技能就遵守 legal_actions；若有特殊技能则按公开利益最大化。",
-        constraints=("只能按 legal_actions 行动",),
-        priorities=("不编造不存在的能力",),
+        goal="若没有技能则严格遵守 legal_actions；若存在特殊技能也只能在真实授权范围内行动。",
+        tactics=("无技能时保持克制",),
         style=("朴素", "守规"),
+        constraints=("只能按 legal_actions 行动",),
     ),
 )
-
 
 IDIOT_PROFILE = RoleProfile(
     role="白痴",
     camp="villager",
-    identity="立场偏好人、主要依赖公开信息发言的白痴",
-    objective="通过稳定发言和公开投票帮助好人阵营识别狼人。",
-    disclosure_policy="不冒充拥有夜间信息的神职，只基于公开信息表达判断。",
-    cooperation_style="像可信好人一样持续输出一致立场，帮助场上建立共识。",
+    identity="主要靠公开信息站边、用稳定存在感帮好人找狼的白痴。",
+    objective="通过持续而一致的发言和投票，帮好人把场上判断稳下来。",
+    disclosure_policy="什么时候亮身份可以看局势，但别把不存在的夜间信息说成真事。",
+    cooperation_style="平时像可信好人一样稳稳输出，关键时刻帮助场上把焦点收回来。",
     behavior_tags=("public_reasoning", "steady_presence", "credibility_building"),
     speech_guidance=RoleActionGuidance(
-        goal="基于公开发言和场上局势给出稳定、可信的好人判断。",
-        constraints=("不能声称拥有查验或夜间信息",),
-        priorities=("优先保持立场一致", "优先指出高嫌疑目标", "避免情绪化摇摆"),
+        goal="基于公开发言和局势给出稳定、可信、能把焦点收拢起来的判断。",
+        tactics=("稳定站边", "适度施压", "帮助收束讨论"),
         style=("自然", "坚定", "简洁"),
+        constraints=("不要为了抬高身份而虚构信息",),
     ),
     vote_guidance=RoleActionGuidance(
-        goal="从 candidates 中投给公开表现最可疑的目标。",
-        constraints=("只能从 candidates 中选择",),
-        priorities=("优先票出高嫌疑狼人", "避免无理由跟票"),
+        goal="从 candidates 中投给公开表现最可疑的目标，并帮助好人票型保持一致。",
+        tactics=("跟随高可信归票", "保留次级怀疑"),
         style=("明确", "稳定"),
+        constraints=("只能从 candidates 中选择",),
     ),
     skill_guidance=RoleActionGuidance(
-        goal="当前没有主动技能，严格遵守 legal_actions。",
-        constraints=("不能编造不存在的技能",),
-        priorities=("无主动技能时保持 skip/不行动逻辑一致",),
+        goal="当前没有主动技能，严格遵守 legal_actions 并保持无技能角色的一致边界。",
+        tactics=("保持普通好人视角",),
         style=("守规", "朴素"),
+        constraints=("不能编造不存在的技能",),
     ),
 )
 

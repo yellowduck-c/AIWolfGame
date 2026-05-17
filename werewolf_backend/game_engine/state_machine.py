@@ -20,6 +20,9 @@ class GameStateMachine:
         }
 
     def advance_phase(self, session: GameSession) -> GameSession:
+        if session["status"] == GameStatus.FINISHED or session["phase"] == GamePhase.FINISHED:
+            return session
+
         current_phase = GamePhase(session["phase"])
         if current_phase == GamePhase.VOTING:
             session["phase"] = GamePhase.NIGHT

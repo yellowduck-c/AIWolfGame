@@ -4,6 +4,10 @@ from dataclasses import dataclass, field
 from typing import Any
 
 
+def _copy_event_list(events: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return [dict(event) for event in events]
+
+
 @dataclass(slots=True)
 class AgentIdentityMemory:
     player_id: int
@@ -40,18 +44,18 @@ class AgentMemory:
     def record_skill(self, payload: dict[str, Any]) -> None:
         self.decision_history.skills.append(payload)
 
-    def to_summary(self) -> dict[str, Any]:
+    def to_summary(self, *, include_private_facts: bool = True) -> dict[str, Any]:
         return {
             "identity": {
                 "player_id": self.identity.player_id,
                 "role": self.identity.role,
                 "camp": self.identity.camp,
             },
-            "public_observations": self.public_observations,
-            "private_facts": self.private_facts,
+            "public_observations": _copy_event_list(self.public_observations),
+            "private_facts": _copy_event_list(self.private_facts) if include_private_facts else [],
             "decision_history": {
-                "speeches": self.decision_history.speeches,
-                "votes": self.decision_history.votes,
-                "skills": self.decision_history.skills,
+                "speeches": list(self.decision_history.speeches),
+                "votes": list(self.decision_history.votes),
+                "skills": _copy_event_list(self.decision_history.skills),
             },
         }
