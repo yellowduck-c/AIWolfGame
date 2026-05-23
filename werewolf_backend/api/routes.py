@@ -15,6 +15,6 @@ async def health_check(request: Request) -> dict[str, str | int | bool]:
         "llm_provider": settings.llm_provider,
         "app_env": settings.app_env,
         "websocket_path": "/ws",
-        "redis_configured": bool(settings.redis_url),
-        "mysql_configured": bool(settings.mysql_url),
+        "redis_configured": bool(settings.redis_host),
+        "mysql_configured": bool(settings.mysql_host),
     }

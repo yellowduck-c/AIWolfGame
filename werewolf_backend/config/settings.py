@@ -18,10 +18,17 @@ class Settings(BaseSettings):
     log_level: str = Field(default="INFO")
 
     # mysql
-    mysql_url: str = Field(default="mysql+pymysql://root:password@127.0.0.1:3306/ai_werewolf")
+    mysql_host: str = Field(default="127.0.0.1")
+    mysql_port: int = Field(default=3306)
+    mysql_user: str = Field(default="root")
+    mysql_password: str = Field(default="password")
+    mysql_database: str = Field(default="ai_werewolf")
 
     # redis
-    redis_url: str = Field(default="redis://127.0.0.1:6379/0")
+    redis_host: str = Field(default="127.0.0.1")
+    redis_port: int = Field(default=6379)
+    redis_password: str = Field(default="")
+    redis_db: int = Field(default=0)
     redis_prefix: str = Field(default="ai_werewolf")
 
     # llm

@@ -32,7 +32,7 @@ class RoleProfile:
     disclosure_policy: str
     cooperation_style: str
     behavior_tags: tuple[str, ...] = ()
-    speech_guidance: RoleActionGuidance = field(default_factory=lambda: RoleActionGuidance(goal="基于公开信息进行简短发言"))
+    speech_guidance: RoleActionGuidance = field(default_factory=lambda: RoleActionGuidance(goal="基于公开信息进行发言"))
     vote_guidance: RoleActionGuidance = field(default_factory=lambda: RoleActionGuidance(goal="从合法候选人中选择最符合身份目标的投票对象"))
     skill_guidance: RoleActionGuidance = field(default_factory=lambda: RoleActionGuidance(goal="仅在 legal_actions 允许范围内使用技能"))
     camp_chat_guidance: RoleActionGuidance = field(default_factory=lambda: RoleActionGuidance(goal="仅在允许时向同阵营发送一句简短私聊"))
